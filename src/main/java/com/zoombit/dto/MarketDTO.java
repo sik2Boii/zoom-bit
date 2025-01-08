@@ -1,6 +1,9 @@
-package com.zoombit.domain;
+package com.zoombit.dto;
 
-public class MarketInfo {
+import lombok.Data;
+
+@Data
+public class MarketDTO {
 
     private String market;
     private String korean_name;
