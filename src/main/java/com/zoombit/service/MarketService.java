@@ -3,18 +3,22 @@ package com.zoombit.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.util.concurrent.RateLimiter;
 import com.zoombit.domain.Markets;
-import com.zoombit.dto.CurrentPriceDTO;
 import com.zoombit.dto.MarketDTO;
 import com.zoombit.repository.MarketRepository;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 @Service
@@ -25,18 +29,24 @@ public class MarketService {
     @Autowired
     private MarketRepository marketRepository;
 
-    private final String API_URL = "https://api.bithumb.com/v1/ticker?markets=";
-    private final int BATCH_SIZE = 150; // 초당 최대 호출 횟수
-    private final int DELAY_MS = 1500; // 1초 대기
+    @Qualifier("kafkaTemplate")
+    @Autowired
+    private KafkaTemplate<String, String> kafkaTemplate;
+
+    private final String API_MARKET_URL = "https://api.bithumb.com/v1/market/all?isDetails=false";
+    private final String API_TICKER_URL = "https://api.bithumb.com/v1/ticker?markets=";
+    private final int BATCH_SIZE = 100;
+    private final int API_CALL_LIMIT = 100;
 
     public void saveAllMarkets() {
 
         RestTemplate restTemplate = new RestTemplate(new HttpComponentsClientHttpRequestFactory());
-        String url = "https://api.bithumb.com/v1/market/all?isDetails=false";
-        String response = restTemplate.getForObject(url, String.class);
+        String response = restTemplate.getForObject(API_MARKET_URL, String.class);
 
         ObjectMapper objectMapper = new ObjectMapper();
         List<MarketDTO> marketDtos = null;
+
+        final KafkaTemplate<String, String> kafkaTemplate;
 
         try {
             marketDtos = objectMapper.readValue(response, new TypeReference<List<MarketDTO>>() {});
@@ -59,35 +69,73 @@ public class MarketService {
         return marketRepository.findAllMarketIds();
     }
 
-    public ResponseEntity<String> getAllCurrentPrice() {
+    public void getAllMarketTicker() {
 
-        List<String> allMarketData = new ArrayList<>();
-        RestTemplate restTemplate = new RestTemplate();
         List<String> marketIds = getAllMarkets();
+        RestTemplate restTemplate = new RestTemplate();
 
-        int totalMarkets = marketIds.size();
+        String topicName = "ticker-topic";
+        int totalMarketCount = marketIds.size();
+        boolean sync = false;
+        RateLimiter rateLimiter = RateLimiter.create(API_CALL_LIMIT);
 
-        for (int i = 0; i < totalMarkets; i += BATCH_SIZE) {
-            int end = Math.min(i + BATCH_SIZE, totalMarkets);
+        for (int i = 0; i < totalMarketCount; i += BATCH_SIZE) {
+
+            int end = Math.min(i + BATCH_SIZE, totalMarketCount);
             List<String> batchMarkets = marketIds.subList(i, end);
 
-            // 배치 내 각 시장 데이터를 호출
             for (String market : batchMarkets) {
-                String url = API_URL + market;
-                String response = restTemplate.getForObject(url, String.class);
-                allMarketData.add(response);
+
+                rateLimiter.acquire(); // 호출 속도 제한
+                String url = API_TICKER_URL + market;
+
+                try {
+
+                    String response = restTemplate.getForObject(url, String.class); // API 호출
+                    ProducerRecord<String, String> producerRecord = new ProducerRecord<>(topicName, market, response);
+                    HashMap<String, String> messageMap = new HashMap<>();
+                    messageMap.put(market, response);
+
+                    sendMessage(kafkaTemplate, producerRecord, messageMap, sync);
+                } catch (HttpClientErrorException e) {
+                    logger.error("현재가(Ticker) 조회 실패: {}", market, e);
+                }
+
             }
 
-            if (end < totalMarkets) {
-                try {
-                    Thread.sleep(DELAY_MS);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+        }
+
+    }
+
+    public void sendMessage(KafkaTemplate<String, String> kafkaTemplate, ProducerRecord<String, String> producerRecord, HashMap<String, String> messageMap, boolean sync) {
+
+        String topic = producerRecord.topic();
+        String key = producerRecord.key();
+        String value = producerRecord.value();
+
+        if (!sync) {
+            // 비동기 전송
+            kafkaTemplate.send(topic, key, value)
+                    .whenComplete((result, exception) -> {
+                        if (exception == null) {
+                            logger.info("비동기 - Key: {}, Partition: {}, Offset: {}",
+                                    key, result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
+                        } else {
+                            logger.error("Exception error from broker: {}", exception.getMessage(), exception);
+                        }
+                    });
+        } else {
+            try {
+                // 동기 전송
+                var metadata = kafkaTemplate.send(topic, key, value).get().getRecordMetadata();
+                logger.info("동기 - Key: {}, Partition: {}, Offset: {}",
+                        key, metadata.partition(), metadata.offset());
+            } catch (ExecutionException e) {
+                logger.error("Error occurred while sending message: {}", e.getMessage(), e);
+            } catch (InterruptedException e) {
+                logger.error("Message sending was interrupted: {}", e.getMessage(), e);
             }
         }
-        // JSON 형태로 데이터를 응답
-        String responseData = String.join(", ", allMarketData);
-        return ResponseEntity.ok(responseData); // HTTP 200 OK와 함께 데이터 반환
     }
+
 }

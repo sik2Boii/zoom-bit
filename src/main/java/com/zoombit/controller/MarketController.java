@@ -1,7 +1,6 @@
 package com.zoombit.controller;
 
 import com.zoombit.service.MarketService;
-import java.util.Arrays;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,8 +30,9 @@ public class MarketController {
         }
     }
 
-    @GetMapping("/get-all-current-prices")
-    public ResponseEntity<String> sendAllMarkets() throws InterruptedException {
-        return marketService.getAllCurrentPrice();
+    @GetMapping("/send-all-ticker")
+    public ResponseEntity<String> sendAllTickerMessage() {
+        marketService.getAllMarketTicker();
+        return ResponseEntity.ok("Market data sent to Kafka successfully");
     }
 }
