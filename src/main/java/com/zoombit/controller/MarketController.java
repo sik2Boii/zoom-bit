@@ -1,6 +1,8 @@
 package com.zoombit.controller;
 
 import com.zoombit.service.MarketService;
+import java.util.Arrays;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,5 +29,10 @@ public class MarketController {
             logger.error("모든 마켓 저장 실패", e);
             return new ResponseEntity<>("모든 마켓 저장 실패", HttpStatus.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    @GetMapping("/get-all-current-prices")
+    public ResponseEntity<String> sendAllMarkets() throws InterruptedException {
+        return marketService.getAllCurrentPrice();
     }
 }
