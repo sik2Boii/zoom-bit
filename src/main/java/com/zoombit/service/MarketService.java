@@ -10,12 +10,15 @@ import com.zoombit.repository.MarketRepository;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
@@ -32,6 +35,10 @@ public class MarketService {
     @Qualifier("kafkaTemplate")
     @Autowired
     private KafkaTemplate<String, String> kafkaTemplate;
+
+    @Qualifier("redisTemplate")
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     private final String API_MARKET_URL = "https://api.bithumb.com/v1/market/all?isDetails=false";
     private final String API_TICKER_URL = "https://api.bithumb.com/v1/ticker?markets=";
@@ -138,4 +145,14 @@ public class MarketService {
         }
     }
 
+    @KafkaListener(topics = "ticker-topic", groupId = "data-group")
+    public void consume(ConsumerRecord<String, String> record) {
+        String key = record.key();
+        String value = record.value();
+        int partition = record.partition();
+        long offset = record.offset();
+
+        redisTemplate.opsForValue().set(key, value);
+        redisTemplate.expire(key, 60, java.util.concurrent.TimeUnit.SECONDS);
+    }
 }
