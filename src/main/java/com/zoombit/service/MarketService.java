@@ -2,6 +2,7 @@ package com.zoombit.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.RateLimiter;
 import com.zoombit.domain.Markets;
@@ -133,8 +134,8 @@ public class MarketService {
             kafkaTemplate.send(topic, key, value)
                     .whenComplete((result, exception) -> {
                         if (exception == null) {
-                            logger.info("비동기 - Key: {}, Partition: {}, Offset: {}",
-                                    key, result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
+//                            logger.info("비동기 - Key: {}, Partition: {}, Offset: {}",
+//                                    key, result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
                         } else {
                             logger.error("Exception error from broker: {}", exception.getMessage(), exception);
                         }
@@ -207,8 +208,14 @@ public class MarketService {
                     String redisData = (String) redisTemplate.opsForValue().get(marketId);
                     System.out.println(redisData);
 
-                    if (redisData.contains("\"error\"")) {
-                        logger.warn("Skipping data for marketId {} due to error field", marketId);
+                    if (redisData == null) {
+                        logger.warn("No data found for marketId: {}", marketId);
+                        continue; // 다음 marketId로 넘어감
+                    }
+
+                    JsonNode jsonNode = objectMapper.readTree(redisData);
+                    if (jsonNode.has("error")) {
+                        logger.warn("Skipping data for marketId {} due to error field: {}", marketId, jsonNode.get("error").toString());
                         continue;
                     }
 
@@ -221,7 +228,7 @@ public class MarketService {
                 // 현재 가격 기준으로 정렬하여 상위 10개 추출
                 top10ByTradePrice = tickerList.stream()
                         .sorted((a, b) -> Double.compare(b.getTrade_price(), a.getTrade_price()))
-                        .limit(10)
+                        .limit(30)
                         .collect(Collectors.toList());
 
             } catch (Exception e) {

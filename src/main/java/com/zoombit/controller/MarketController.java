@@ -21,7 +21,7 @@ public class MarketController {
     @Autowired
     private MarketService marketService;
 
-    @GetMapping("/save-all-markets")
+    @GetMapping("/api/save-all-markets")
     public ResponseEntity<String> saveMarkets() {
         try {
             marketService.saveAllMarkets();
@@ -33,7 +33,7 @@ public class MarketController {
         }
     }
 
-    @GetMapping("/send-all-ticker")
+    @GetMapping("/api/send-all-ticker")
     public ResponseEntity<String> sendAllTickerMessage() {
         try {
             marketService.sendAllTickersToKafka();
@@ -43,7 +43,7 @@ public class MarketController {
         }
     }
 
-    @GetMapping("/get-top10")
+    @GetMapping("/api/get-top10")
     public ResponseEntity<List<TickerDTO>> getTop10() {
         try {
             List<TickerDTO> top10List = marketService.getTop10ByTradePrice();
