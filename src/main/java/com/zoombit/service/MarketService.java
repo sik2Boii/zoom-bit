@@ -6,10 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.RateLimiter;
 import com.zoombit.domain.Markets;
 import com.zoombit.dto.MarketDTO;
+import com.zoombit.dto.TickerDTO;
 import com.zoombit.repository.MarketRepository;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
@@ -20,6 +27,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
@@ -40,6 +48,8 @@ public class MarketService {
     @Autowired
     private RedisTemplate redisTemplate;
 
+    ObjectMapper objectMapper = new ObjectMapper();
+
     private final String API_MARKET_URL = "https://api.bithumb.com/v1/market/all?isDetails=false";
     private final String API_TICKER_URL = "https://api.bithumb.com/v1/ticker?markets=";
     private final int BATCH_SIZE = 100;
@@ -50,10 +60,7 @@ public class MarketService {
         RestTemplate restTemplate = new RestTemplate(new HttpComponentsClientHttpRequestFactory());
         String response = restTemplate.getForObject(API_MARKET_URL, String.class);
 
-        ObjectMapper objectMapper = new ObjectMapper();
         List<MarketDTO> marketDtos = null;
-
-        final KafkaTemplate<String, String> kafkaTemplate;
 
         try {
             marketDtos = objectMapper.readValue(response, new TypeReference<List<MarketDTO>>() {});
@@ -76,7 +83,8 @@ public class MarketService {
         return marketRepository.findAllMarketIds();
     }
 
-    public void getAllMarketTicker() {
+    @Scheduled(fixedRate = 60000)
+    public void sendAllTickersToKafka() {
 
         List<String> marketIds = getAllMarkets();
         RestTemplate restTemplate = new RestTemplate();
@@ -153,6 +161,77 @@ public class MarketService {
         long offset = record.offset();
 
         redisTemplate.opsForValue().set(key, value);
-        redisTemplate.expire(key, 60, java.util.concurrent.TimeUnit.SECONDS);
+        redisTemplate.expire(key, 60, TimeUnit.SECONDS);
     }
+
+    private List<Map<String, Object>> getTop10ByTradePrice(List<Map<String, Object>> currentData) {
+        return null;
+    }
+
+    public List<Map<String, Object>> getAllDataFromRedis() {
+        // 모든 키 가져오기
+        Set<String> keys = redisTemplate.keys("*");
+
+        if (keys == null || keys.isEmpty()) {
+            return Collections.emptyList(); // 키가 없으면 빈 리스트 반환
+        }
+
+        // 각 키의 값을 조회하여 리스트로 반환
+        return keys.stream()
+                .map(key -> {
+                    String value = (String) redisTemplate.opsForValue().get(key);
+                    return parseToMap(key, value);
+                })
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> parseToMap(String key, String value) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("key", key); // 키를 저장
+        map.put("value", value); // 값을 저장
+        return map;
+    }
+
+    public List<TickerDTO> getTop10ByTradePrice() {
+
+        List<Map<String, Object>> currentData = getAllDataFromRedis();
+        List<TickerDTO> top10ByTradePrice = new ArrayList<>();
+
+        if (currentData != null) {
+
+            try {
+                List<String> marketIds = getAllMarkets();
+                List<TickerDTO> tickerList = new ArrayList<>();
+
+                for (String marketId : marketIds) {
+                    String redisData = (String) redisTemplate.opsForValue().get(marketId);
+                    System.out.println(redisData);
+
+                    if (redisData.contains("\"error\"")) {
+                        logger.warn("Skipping data for marketId {} due to error field", marketId);
+                        continue;
+                    }
+
+                    List<TickerDTO> tmp = objectMapper.readValue(redisData, new TypeReference<List<TickerDTO>>() {});
+                    TickerDTO ticker = tmp.get(0);
+                    tickerList.add(ticker);
+
+                }
+
+                // 현재 가격 기준으로 정렬하여 상위 10개 추출
+                top10ByTradePrice = tickerList.stream()
+                        .sorted((a, b) -> Double.compare(b.getTrade_price(), a.getTrade_price()))
+                        .limit(10)
+                        .collect(Collectors.toList());
+
+            } catch (Exception e) {
+                logger.error("Error while processing top 10 data: {}", e.getMessage());
+            }
+
+        }
+
+        return top10ByTradePrice;
+
+    }
+
 }

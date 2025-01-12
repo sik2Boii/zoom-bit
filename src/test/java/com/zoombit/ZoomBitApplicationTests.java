@@ -3,7 +3,7 @@ package com.zoombit;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zoombit.dto.CurrentPriceDTO;
+import com.zoombit.dto.TickerDTO;
 import com.zoombit.dto.MarketDTO;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -43,15 +43,15 @@ class ZoomBitApplicationTests {
         String url = "https://api.bithumb.com/v1/ticker?markets=KRW-BTC";
         String response = restTemplate.getForObject(url, String.class);
         ObjectMapper objectMapper = new ObjectMapper();
-        List<CurrentPriceDTO> currentPriceList = objectMapper.readValue(response, new TypeReference<List<CurrentPriceDTO>>() {});
+        List<TickerDTO> currentPriceList = objectMapper.readValue(response, new TypeReference<List<TickerDTO>>() {});
 
         // 첫 번째 객체 출력
-        CurrentPriceDTO currentPrice = currentPriceList.get(0);
+        TickerDTO currentPrice = currentPriceList.get(0);
         System.out.println(currentPrice);
         // 결과 출력
         System.out.println("##### CurrentPriceDTO.size(): " + currentPriceList.size());
         int idx = 1;
-        for (CurrentPriceDTO marketDto : currentPriceList) {
+        for (TickerDTO marketDto : currentPriceList) {
             System.out.println("idx: " + idx + " == " + marketDto);
             idx++;
         }

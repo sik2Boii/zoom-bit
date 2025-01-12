@@ -1,9 +1,11 @@
 package com.zoombit.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 
 @Data
-public class CurrentPriceDTO {
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class TickerDTO {
 
     private String market;                     // 종목 구분 코드
     private String trade_date;                 // 최근 거래 일자(UTC), yyyyMMdd
